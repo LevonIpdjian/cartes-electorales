@@ -1,13 +1,3 @@
-# Indicateurs électoraux par commune
-# Source : « Données des élections agrégées » (data.gouv.fr, jeu 6481e741d4cf002ec0efec9d)
-#
-#  1. Mélenchon, présidentielle 2022 T1
-#  2. Liste LFI (Manon Aubry), européennes 2024
-#  3. Nouveau Front populaire (nuance UG), législatives 2024 T1
-#  4. Plus d'une liste au 1er tour des municipales 2026 ? (+ nombre d'inscrits)
-#
-# Les résultats sont au bureau de vote : on somme voix et exprimés par commune.
-
 library(arrow)
 library(dplyr)
 library(tidyr)
@@ -26,14 +16,12 @@ generaux  <- open_dataset("general_results.parquet")
 
 elections <- c("2022_pres_t1", "2024_euro_t1", "2024_legi_t1")
 
-# Exprimés par commune et par élection
 exprimes <- generaux |>
   filter(id_election %in% elections) |>
   group_by(id_election, code_commune) |>
   summarise(exprimes = sum(exprimes, na.rm = TRUE)) |>
   collect()
 
-# Voix des trois cibles, repérées de façon robuste (accents, casse)
 voix <- candidats |>
   filter(id_election %in% elections) |>
   select(id_election, code_commune, nom, prenom, nuance, voix) |>
@@ -61,8 +49,6 @@ resultats <- voix |>
     names_glue  = "{indicateur}_{.value}"
   )
 
-# 4. Nombre de listes au 1er tour des municipales 2026
-#    (quelques lignes n'ont pas de numéro de panneau : on se rabat sur le libellé)
 listes_2026 <- candidats |>
   filter(id_election == "2026_muni_t1") |>
   select(code_commune, no_panneau, libelle_abrege_liste) |>
@@ -79,7 +65,6 @@ inscrits_2026 <- generaux |>
   summarise(inscrits_muni_2026 = sum(inscrits, na.rm = TRUE)) |>
   collect()
 
-# Libellés des communes (dernier libellé connu)
 communes <- generaux |>
   filter(id_election == "2026_muni_t1" | id_election %in% elections) |>
   distinct(code_commune, libelle_commune, code_departement) |>
@@ -92,7 +77,6 @@ tableau <- communes |>
   left_join(inscrits_2026, by = "code_commune") |>
   arrange(code_commune)
 
-# Résumé national (pourcentages sur l'ensemble des exprimés)
 national <- voix |>
   group_by(indicateur, id_election) |>
   summarise(voix = sum(voix), .groups = "drop") |>
@@ -108,5 +92,4 @@ cat("\nCommunes avec plus d'une liste aux municipales 2026 (T1) :",
 
 write.csv2(tableau, "indicateurs_communes.csv", row.names = FALSE, fileEncoding = "UTF-8")
 
-# Exemple pour une commune :
 # tableau |> filter(code_commune == "59350")  # Lille

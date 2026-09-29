@@ -487,5 +487,5 @@ html <- sub("__DATA__", json, gabarit, fixed = TRUE)
 html <- sub("__TITRE__", meta$titre, html, fixed = TRUE)
 
 sortie <- sprintf("carte_circo_%s-%s.html", DEPARTEMENT, CIRCO)
-writeLines(html, sortie, useBytes = TRUE)
+writeLines(html, paste0("C:/Users/leoni/Documents/CoteDor/",sortie), useBytes = TRUE)
 message("Carte écrite : ", normalizePath(sortie))
