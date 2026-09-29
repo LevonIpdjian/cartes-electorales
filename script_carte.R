@@ -178,7 +178,8 @@ for (i in seq_len(nrow(communes))) {
     legi2024 = ligne_score(scores$legi2024, z),
     muni2026 = list(
       nb_listes = if (nrow(l)) l$nb_listes else NULL,
-      listes = if (nrow(l)) l$listes[[1]] else character(0),
+      # I() : garder un tableau JSON même avec une seule liste (sinon auto_unbox en fait un texte)
+      listes = I(if (nrow(l)) l$listes[[1]] else character(0)),
       inscrits = if (length(ins)) ins else NULL
     )
   )
@@ -405,7 +406,8 @@ function popup(z) {
     `Inscrits municipales 2026 : <b>${fmtNb(d.muni2026.inscrits)}</b><br>`,
     `Municipales 2026 : <b>${texteValeur("muni2026", d.muni2026.nb_listes)}</b>${d.partielle ? " (toute la commune)" : ""}`,
   ];
-  if (d.muni2026.listes && d.muni2026.listes.length) l.push("<ul>" + d.muni2026.listes.map(x => `<li>${x}</li>`).join("") + "</ul>");
+  const listes = [].concat(d.muni2026.listes || []);
+  if (listes.length) l.push("<ul>" + listes.map(x => `<li>${x}</li>`).join("") + "</ul>");
   return l.join("");
 }
 
@@ -486,6 +488,6 @@ afficher("pres2022");
 html <- sub("__DATA__", json, gabarit, fixed = TRUE)
 html <- sub("__TITRE__", meta$titre, html, fixed = TRUE)
 
-sortie <- sprintf("carte_circo_%s-%s.html", DEPARTEMENT, CIRCO)
+sortie <- sprintf("index.html")
 writeLines(html, paste0("C:/Users/leoni/Documents/CoteDor/",sortie), useBytes = TRUE)
 message("Carte écrite : ", normalizePath(sortie))
