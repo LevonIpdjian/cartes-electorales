@@ -116,11 +116,15 @@ vers_zone <- function(df) {
 lire_generaux <- function(election) {
   generaux |>
     filter(id_election == election, code_commune %in% codes_communes) |>
-    select(code_commune, code_bv, inscrits, exprimes) |>
+    select(code_commune, code_bv, inscrits, votants, exprimes) |>
     collect() |>
     vers_zone() |>
     group_by(zone) |>
-    summarise(inscrits = sum(inscrits, na.rm = TRUE), exprimes = sum(exprimes, na.rm = TRUE))
+    summarise(inscrits = sum(inscrits, na.rm = TRUE),
+              votants  = sum(votants,  na.rm = TRUE),
+              exprimes = sum(exprimes, na.rm = TRUE)) |>
+    # Abstentionnistes = inscrits qui n'ont pas voté (blancs et nuls exclus : ce sont des votants)
+    mutate(abstentions = inscrits - votants)
 }
 
 lire_candidats <- function(election) {
@@ -161,9 +165,26 @@ inscrits_2026 <- lire_generaux("2026_muni_t1") |> select(zone, inscrits)
 # ---- 5. Assemblage des données pour la page ----------------------------------
 ligne_score <- function(tab, z) {
   r <- tab[tab$zone == z, ]
-  if (nrow(r) == 0 || r$exprimes == 0) return(list(voix = NULL, exprimes = NULL, pct = NULL))
-  list(voix = r$voix, exprimes = r$exprimes, pct = r$pct)
+  if (nrow(r) == 0 || r$exprimes == 0) {
+    return(list(voix = NULL, exprimes = NULL, pct = NULL,
+                inscrits = NULL, abstentions = NULL, pct_abst = NULL))
+  }
+  list(voix = r$voix, exprimes = r$exprimes, pct = r$pct,
+       inscrits = r$inscrits, abstentions = r$abstentions,
+       pct_abst = round(100 * r$abstentions / r$inscrits, 2))
 }
+
+# Point garanti à l'intérieur de chaque commune (le centroïde peut tomber dehors) :
+# emplacement des cercles proportionnels.
+centres <- geo |>
+  st_transform(2154) |>
+  st_point_on_surface() |>
+  st_transform(4326)
+coords_centres <- st_coordinates(centres)
+centre_zone <- setNames(
+  lapply(seq_len(nrow(centres)), function(i) round(c(coords_centres[i, "Y"], coords_centres[i, "X"]), 5)),
+  centres$zone
+)
 
 zones <- list()
 for (i in seq_len(nrow(communes))) {
@@ -173,6 +194,7 @@ for (i in seq_len(nrow(communes))) {
   ins <- inscrits_2026$inscrits[inscrits_2026$zone == z]
   zones[[z]] <- list(
     nom = cm$nom, nom_court = cm$nom_court, partielle = cm$partielle,
+    centre = centre_zone[[z]],
     pres2022 = ligne_score(scores$pres2022, z),
     euro2024 = ligne_score(scores$euro2024, z),
     legi2024 = ligne_score(scores$legi2024, z),
@@ -187,7 +209,9 @@ for (i in seq_len(nrow(communes))) {
 
 total_score <- function(tab) {
   list(voix = sum(tab$voix), exprimes = sum(tab$exprimes),
-       pct = round(100 * sum(tab$voix) / sum(tab$exprimes), 2))
+       pct = round(100 * sum(tab$voix) / sum(tab$exprimes), 2),
+       inscrits = sum(tab$inscrits), abstentions = sum(tab$abstentions),
+       pct_abst = round(100 * sum(tab$abstentions) / sum(tab$inscrits), 2))
 }
 nb_listes_zone <- sapply(zones, function(z) if (is.null(z$muni2026$nb_listes)) NA else z$muni2026$nb_listes)
 total <- list(
@@ -281,6 +305,20 @@ gabarit <- r"---[<!doctype html>
   .leaflet-popup-content { font:14px/1.5 system-ui,sans-serif; margin:12px 14px; }
   .leaflet-popup-content h3 { margin:0 0 6px; font-size:15px; }
   .leaflet-popup-content ul { margin:4px 0 0; padding-left:18px; font-size:13px; }
+  .filtres button.bascule { display:flex; align-items:center; gap:10px; border-style:dashed; }
+  .filtres button.bascule[aria-pressed="true"] { background:#52514e; border-color:#52514e; border-style:solid; color:#fff; }
+  .filtres button.bascule:disabled { opacity:.45; cursor:not-allowed; border-color:var(--line); }
+  .coche { width:16px; height:16px; flex:none; border-radius:4px; border:1.5px solid currentColor; position:relative; }
+  .bascule[aria-pressed="true"] .coche::after { content:""; position:absolute; left:4px; top:0; width:4px; height:9px;
+                                                border:solid currentColor; border-width:0 2px 2px 0; transform:rotate(45deg); }
+  .colonne-carte { display:flex; flex-direction:column; gap:12px; min-width:0; }
+  .legende-abst { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:12px 16px;
+                  display:flex; flex-wrap:wrap; align-items:center; gap:10px 28px; font-size:13px; }
+  .legende-abst[hidden] { display:none; }
+  .legende-abst h3 { font-size:13px; margin:0; flex-basis:100%; }
+  .legende-abst svg { display:block; }
+  .classes-abst { display:flex; flex-wrap:wrap; gap:4px 12px; }
+  .legende-abst .sub { font-size:12px; flex-basis:100%; }
   @media (max-width:860px) {
     main { grid-template-columns:1fr; padding:8px 16px 16px; }
     header, .filtres, .note { padding-left:16px; padding-right:16px; }
@@ -299,9 +337,16 @@ gabarit <- r"---[<!doctype html>
   <button data-ind="legi2024">Législatives 2024<small>NFP, 1er tour</small></button>
   <button data-ind="muni2026">Municipales 2026<small>Nombre de listes, 1er tour</small></button>
   <button data-ind="inscrits2026">Inscrits 2026<small>Municipales, 1er tour</small></button>
+  <button type="button" class="bascule" id="voir-abst" aria-pressed="false">
+    <span class="coche" aria-hidden="true"></span>
+    <span>Afficher les abstentionnistes<small>cercles proportionnels</small></span>
+  </button>
 </nav>
 <main>
-  <div id="carte" role="region" aria-label="Carte de la circonscription"></div>
+  <div class="colonne-carte">
+    <div id="carte" role="region" aria-label="Carte de la circonscription"></div>
+    <section class="legende-abst" id="legende-abst" hidden></section>
+  </div>
   <aside>
     <section class="bloc" id="resume"></section>
     <section class="bloc tableau">
@@ -341,6 +386,7 @@ document.getElementById("note").innerHTML =
   "Source : ministère de l'Intérieur, « Données des élections agrégées » (data.gouv.fr), résultats par bureau de vote additionnés par commune ; " +
   "contours et rattachement des bureaux aux circonscriptions : INSEE / data.gouv.fr (2024). Pourcentages calculés sur les suffrages exprimés. " +
   "NFP = candidats de nuance « Union de la gauche » (UG). Le dégradé va du plus bas au plus haut de la circonscription pour le scrutin affiché. " +
+  "Abstentionnistes = inscrits moins votants (les blancs et nuls sont des votants) ; les cercles sont placés à l'intérieur de chaque commune. " +
   (DONNEES.meta.partielles.length
     ? "Communes coupées entre plusieurs circonscriptions : seuls leurs bureaux de la circonscription sont comptés et dessinés (" +
       DONNEES.meta.partielles.join(", ") + ") ; pour les municipales, leur nombre de listes est celui de toute la commune."
@@ -396,13 +442,103 @@ const calque = L.geoJSON(DONNEES.geo, {
 }).addTo(carte);
 carte.fitBounds(calque.getBounds(), { padding: [10, 10] });
 
+// ---- Abstentionnistes : cercles proportionnels ------------------------------
+// Surface du cercle proportionnelle au nombre d'abstentionnistes (rayon ∝ racine),
+// même échelle pour les trois scrutins afin qu'ils restent comparables.
+// Teinte grise (neutre, pas une couleur de camp) selon le taux d'abstention.
+// Les classes sont propres à chaque scrutin (quintiles des communes, bornes
+// arrondies au point entier) : l'abstention n'a pas le même niveau à la
+// présidentielle et aux européennes, des seuils communs écraseraient les contrastes.
+const SCRUTINS_ABST = ["pres2022", "euro2024", "legi2024"];
+const RAYON_MAX = 30;
+const GRIS_ABST = ["#dcdbd7", "#b5b3ae", "#8a8883", "#5e5c58", "#33322f"];
+const fmtBorne = b => b.toLocaleString("fr-FR") + " %";
+
+function classesAbst(ind) {
+  const v = Object.values(Z).map(d => d[ind].pct_abst).filter(p => p != null).sort((a, b) => a - b);
+  if (!v.length) return [];
+  const quantile = q => v[Math.min(v.length - 1, Math.floor(q * v.length))];
+  // Bornes intérieures uniques, arrondies : moins de 5 classes si les valeurs se tassent
+  const bornes = [...new Set([0.2, 0.4, 0.6, 0.8].map(q => Math.round(quantile(q))))]
+    .filter(b => b > v[0] && b <= v[v.length - 1]);
+  const lim = [-Infinity, ...bornes, Infinity];
+  // Répartir les gris sur toute la gamme même s'il y a moins de 5 classes
+  const n = lim.length - 1;
+  return lim.slice(0, -1).map((min, i) => ({
+    min, max: lim[i + 1],
+    couleur: GRIS_ABST[n === 1 ? 2 : Math.round(i * (GRIS_ABST.length - 1) / (n - 1))],
+    texte: n === 1 ? "toutes les communes" : i === 0 ? `< ${fmtBorne(lim[1])}` : i === n - 1 ? `${fmtBorne(min)} ou plus` : `${fmtBorne(min)} à ${fmtBorne(lim[i + 1])}`,
+  }));
+}
+const CLASSES_ABST = Object.fromEntries(SCRUTINS_ABST.map(s => [s, classesAbst(s)]));
+const couleurAbst = (ind, p) => p == null ? SANS_DONNEE : CLASSES_ABST[ind].find(c => p >= c.min && p < c.max).couleur;
+const ABST_MAX = Math.max(1, ...Object.values(Z).flatMap(d => SCRUTINS_ABST.map(s => d[s].abstentions || 0)));
+const rayon = n => RAYON_MAX * Math.sqrt(n / ABST_MAX);
+
+carte.createPane("cercles");
+carte.getPane("cercles").style.zIndex = 450; // au-dessus des aplats (400), sous les étiquettes (650)
+const calqueAbst = L.layerGroup();
+let voirAbst = false;
+
+function dessinerCercles(ind) {
+  calqueAbst.clearLayers();
+  if (!SCRUTINS_ABST.includes(ind)) return;
+  // Les plus gros d'abord, pour que les petits restent visibles par-dessus
+  Object.keys(Z)
+    .filter(z => Z[z].centre && Z[z][ind].abstentions != null)
+    .sort((a, b) => Z[b][ind].abstentions - Z[a][ind].abstentions)
+    .forEach(z => {
+      const d = Z[z][ind];
+      L.circleMarker(Z[z].centre, {
+        pane: "cercles", radius: Math.max(rayon(d.abstentions), 2),
+        fillColor: couleurAbst(ind, d.pct_abst), fillOpacity: 0.85, color: "#fcfcfb", weight: 1.2,
+      })
+        .bindTooltip(`${Z[z].nom_court}<br><b>${fmtNb(d.abstentions)}</b> abstentionnistes (${fmtPct(d.pct_abst)})`,
+                     { sticky: true, className: "etiquette" })
+        .on("click", () => { selectionner(z, false); couches[z].openPopup(); })
+        .addTo(calqueAbst);
+    });
+}
+
+function legendeAbst(ind) {
+  // Cercles emboîtés : trois valeurs arrondies de la même échelle que la carte
+  // Arrondi vers le bas à 1, 2 ou 5 × 10^n, pour ne jamais dépasser le maximum réel
+  const arrondi = v => {
+    const p = Math.pow(10, Math.floor(Math.log10(Math.max(v, 1))));
+    return [5, 2, 1].map(k => k * p).find(x => x <= v) || p;
+  };
+  const valeurs = [...new Set([ABST_MAX, ABST_MAX / 5, ABST_MAX / 25].map(arrondi))]
+    // pas deux étiquettes à moins de 13 px l'une de l'autre
+    .filter((v, i, t) => i === 0 || 2 * (rayon(t[i - 1]) - rayon(v)) >= 13);
+  const h = 2 * RAYON_MAX + 4, base = h - 2, cx = RAYON_MAX + 2;
+  const cercles = valeurs.map(v => {
+    const r = rayon(v);
+    return `<circle cx="${cx}" cy="${base - r}" r="${r}" fill="none" stroke="#52514e"/>
+            <line x1="${cx}" y1="${base - 2 * r}" x2="${2 * RAYON_MAX + 14}" y2="${base - 2 * r}" stroke="#52514e" stroke-dasharray="2 2"/>
+            <text x="${2 * RAYON_MAX + 18}" y="${base - 2 * r + 4}" font-size="12" fill="currentColor">${fmtNb(v)}</text>`;
+  }).join("");
+  return `<h3>Abstentionnistes</h3>
+    <svg width="170" height="${h}" role="img" aria-label="Taille des cercles">${cercles}</svg>
+    <div class="classes-abst">${CLASSES_ABST[ind].map(c => `<span><span class="p" style="background:${c.couleur}"></span>${c.texte}</span>`).join("")}</div>
+    <p class="sub">Taille : nombre d'abstentionnistes. Même échelle de taille pour les trois scrutins. Gris : part des inscrits, en cinq classes d'effectifs égaux propres à ce scrutin.</p>`;
+}
+
+document.getElementById("voir-abst").addEventListener("click", e => {
+  voirAbst = !voirAbst;
+  e.currentTarget.setAttribute("aria-pressed", voirAbst);
+  if (voirAbst) calqueAbst.addTo(carte); else carte.removeLayer(calqueAbst);
+  afficher(indicateur);
+});
+
 function popup(z) {
   const d = Z[z];
+  const abst = s => d[s].abstentions == null ? "" :
+    ` <span style="color:#52514e">· abst. ${fmtPct(d[s].pct_abst)}</span>`;
   const l = [
     `<h3>${d.nom}</h3>`,
-    `Mélenchon 2022 : <b>${fmtPct(d.pres2022.pct)}</b> (${fmtNb(d.pres2022.voix)} voix)<br>`,
-    `LFI européennes 2024 : <b>${fmtPct(d.euro2024.pct)}</b> (${fmtNb(d.euro2024.voix)} voix)<br>`,
-    `NFP législatives 2024 : <b>${fmtPct(d.legi2024.pct)}</b> (${fmtNb(d.legi2024.voix)} voix)<br>`,
+    `Mélenchon 2022 : <b>${fmtPct(d.pres2022.pct)}</b> (${fmtNb(d.pres2022.voix)} voix)${abst("pres2022")}<br>`,
+    `LFI européennes 2024 : <b>${fmtPct(d.euro2024.pct)}</b> (${fmtNb(d.euro2024.voix)} voix)${abst("euro2024")}<br>`,
+    `NFP législatives 2024 : <b>${fmtPct(d.legi2024.pct)}</b> (${fmtNb(d.legi2024.voix)} voix)${abst("legi2024")}<br>`,
     `Inscrits municipales 2026 : <b>${fmtNb(d.muni2026.inscrits)}</b><br>`,
     `Municipales 2026 : <b>${texteValeur("muni2026", d.muni2026.nb_listes)}</b>${d.partielle ? " (toute la commune)" : ""}`,
   ];
@@ -424,7 +560,7 @@ function selectionner(z, depuisTableau) {
 
 function afficher(ind) {
   indicateur = ind;
-  document.querySelectorAll(".filtres button").forEach(b => b.setAttribute("aria-pressed", b.dataset.ind === ind));
+  document.querySelectorAll(".filtres button[data-ind]").forEach(b => b.setAttribute("aria-pressed", b.dataset.ind === ind));
   const def = INDICATEURS[ind];
   const zones = Object.keys(Z);
   const vals = zones.map(z => valeur(ind, z)).filter(v => v != null);
@@ -459,15 +595,30 @@ function afficher(ind) {
   }
   document.getElementById("resume").innerHTML = html;
 
+  // Cercles d'abstentionnistes : seulement pour les trois scrutins, si la case est cochée
+  const abstPossible = SCRUTINS_ABST.includes(ind);
+  const avecAbst = voirAbst && abstPossible;
+  document.getElementById("voir-abst").disabled = !abstPossible;
+  dessinerCercles(avecAbst ? ind : null);
+  const legende = document.getElementById("legende-abst");
+  legende.hidden = !avecAbst;
+  legende.innerHTML = avecAbst ? legendeAbst(ind) : "";
+  if (avecAbst) {
+    const t = DONNEES.total[def.cle];
+    document.getElementById("resume").insertAdjacentHTML("beforeend",
+      `<p class="sub" style="margin-top:10px">${fmtNb(t.abstentions)} abstentionnistes sur ${fmtNb(t.inscrits)} inscrits (<b>${fmtPct(t.pct_abst)}</b>)</p>`);
+  }
+
   const colonne = def.type === "pct" ? "Score" : def.type === "listes" ? "Listes" : "Inscrits";
   document.getElementById("thead").innerHTML =
-    `<tr><th>Commune</th><th class="n">${colonne}</th>${def.type === "pct" ? '<th class="n">Voix</th>' : ""}</tr>`;
+    `<tr><th>Commune</th><th class="n">${colonne}</th>${def.type === "pct" ? '<th class="n">Voix</th>' : ""}${avecAbst ? '<th class="n">Abst.</th>' : ""}</tr>`;
   const lignes = zones.map(z => ({ z, v: valeur(ind, z) })).sort((a, b) => (b.v ?? -1) - (a.v ?? -1));
   document.getElementById("tbody").innerHTML = lignes.map(({ z, v }) =>
     `<tr class="ligne${z === zoneActive ? " actif" : ""}" data-zone="${z}" data-nom="${Z[z].nom.toLowerCase()}">
       <td><span class="pastille" style="background:${couleurPour(ind, v, min, max)}"></span>${Z[z].nom_court}</td>
       <td class="n">${texteValeur(ind, v)}</td>
       ${def.type === "pct" ? `<td class="n">${fmtNb(Z[z][def.cle].voix)}</td>` : ""}
+      ${avecAbst ? `<td class="n">${fmtPct(Z[z][def.cle].pct_abst)}</td>` : ""}
     </tr>`).join("");
   document.querySelectorAll("tr.ligne").forEach(tr => tr.addEventListener("click", () => selectionner(tr.dataset.zone, true)));
   filtrer();
@@ -478,7 +629,7 @@ function filtrer() {
   document.querySelectorAll("tr.ligne").forEach(tr => { tr.style.display = !q || tr.dataset.nom.includes(q) ? "" : "none"; });
 }
 document.getElementById("recherche").addEventListener("input", filtrer);
-document.querySelectorAll(".filtres button").forEach(b => b.addEventListener("click", () => afficher(b.dataset.ind)));
+document.querySelectorAll(".filtres button[data-ind]").forEach(b => b.addEventListener("click", () => afficher(b.dataset.ind)));
 afficher("pres2022");
 </script>
 </body>
