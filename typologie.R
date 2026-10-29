@@ -200,17 +200,11 @@ message("France (pondéré par les inscrits) : écart Mélenchon 2022 - LFI 2024
 fwrite(table_bv, FICHIER_SORTIE, sep = ";", dec = ",", bom = TRUE, na = "")
 message("Table écrite : ", normalizePath(FICHIER_SORTIE))
 
-# ---- 6. Typologie du potentiel de vote LFI ------------------------------------------------
+# ---- 6. Typologie ------------------------------------------------
 # Trois variables de la présidentielle 2022 (1er tour), toutes en % des inscrits :
 #   melenchon22           vote Mélenchon
 #   gauche_hors_lfi22     vote Roussel + Hidalgo + Jadot
 #   taux_abstention_2022  abstention
-# Les européennes 2024, scrutin trop particulier (faible participation, listes de gauche
-# séparées), ne sont pas utilisées.
-# ACP normée (chaque variable pèse autant), bureaux pondérés par leurs inscrits.
-# Construite sur la France métropolitaine (Corse comprise) : l'outre-mer et les Français
-# de l'étranger, à l'abstention très forte, accaparaient sinon des types entiers.
-# Ils restent « non classés ».
 VARS_TYPO   <- c("melenchon22", "gauche_hors_lfi22", "taux_abstention_2022")
 SEUIL_EXPRIMES <- 10   # bureaux plus petits : non classés (résultats trop instables)
 
@@ -250,12 +244,7 @@ init    <- apply(coord, 2, function(x) tapply(x * w, classe0, sum)) /
   as.vector(tapply(w, classe0, sum))
 km2 <- kmeans(coord, centers = init, iter.max = 100)
 
-# 4. Numérotation par profil (et non par l'ordre arbitraire du k-means), pour que
-#    chaque numéro garde le même sens d'une exécution à l'autre :
-#    5 = plus fort vote Mélenchon ; puis parmi le reste : 3 = plus forte gauche hors LFI ;
-#    6 = plus forte abstention ; 4 = plus fort vote Mélenchon ;
-#    1 et 2 = les deux derniers (1 = le plus faible vote Mélenchon).
-#    Couleurs des cartes par paires : 1-2 bleus, 3-4 roses, 5-6 violets.
+# 4. Fin du k means et choix
 if (k != 6) stop("La numérotation par profil est écrite pour 6 types : l'adapter si k change.")
 moy <- as.data.frame(sapply(VARS_TYPO, function(v) tapply(df[[v]] * w, km2$cluster, sum) / tapply(w, km2$cluster, sum)))
 moy$brut <- as.integer(rownames(moy))
