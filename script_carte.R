@@ -549,12 +549,15 @@ const VUE = META.vue_ensemble;   // true sur la page du département (une zone =
 // Dégradé violet, du clair au foncé (une seule teinte, clarté régulière)
 const RAMPE = ["#e4defb", "#c7bbf5", "#a896ee", "#8a72e3", "#6c51d1", "#5238ad", "#3a2580"];
 const SANS_DONNEE = "#d9d8d4";
+// Municipales : gris du clair au foncé ; les zones sans résultat sont en blanc
+// (et non en gris « n.d. », qu'on confondrait avec « 1 liste »)
 const CLASSES_LISTES = [
-  { min: 0, max: 1, couleur: "#e4e3df", texte: "1 liste (pas de choix)" },
-  { min: 2, max: 2, couleur: "#a896ee", texte: "2 listes" },
-  { min: 3, max: 3, couleur: "#6c51d1", texte: "3 listes" },
-  { min: 4, max: 9999, couleur: "#3a2580", texte: "4 listes ou plus" },
+  { min: 0, max: 1, couleur: "#b5b3ae", texte: "1 liste (pas de choix)" },
+  { min: 2, max: 2, couleur: "#8a8883", texte: "2 listes" },
+  { min: 3, max: 3, couleur: "#5e5c58", texte: "3 listes" },
+  { min: 4, max: 9999, couleur: "#33322f", texte: "4 listes ou plus" },
 ];
+const SANS_LISTES = "#ffffff";
 const INDICATEURS = {
   pres2022: { titre: "Mélenchon - présidentielle 2022 (1er tour)", type: "pct", cle: "pres2022" },
   euro2024: { titre: "LFI (Manon Aubry) - européennes 2024", type: "pct", cle: "euro2024" },
@@ -651,7 +654,7 @@ function texteValeur(ind, v) {
   return fmtNb(v);
 }
 function couleurPour(ind, v, min, max) {
-  if (v == null) return SANS_DONNEE;
+  if (v == null) return INDICATEURS[ind].type === "listes" ? SANS_LISTES : SANS_DONNEE;
   if (INDICATEURS[ind].type === "typo") return TYPES[v].couleur;
   if (INDICATEURS[ind].type === "listes") return CLASSES_LISTES.find(c => v >= c.min && v <= c.max).couleur;
   return couleurSequentielle(max > min ? (v - min) / (max - min) : 0.5);
@@ -858,7 +861,8 @@ function afficher(ind) {
     html += `<div class="total">${fmtNb(T.muni2026.inscrits)}</div><p class="sub">inscrits sur ${perimetre}</p>`;
   }
   if (def.type === "listes") {
-    html += `<div class="legende-cases">` + CLASSES_LISTES.map(c => `<div><span class="p" style="background:${c.couleur}"></span>${c.texte}</div>`).join("") + `</div>`;
+    html += `<div class="legende-cases">` + CLASSES_LISTES.map(c => `<div><span class="p" style="background:${c.couleur}"></span>${c.texte}</div>`).join("") +
+      (vals.length < zones.length ? `<div><span class="p" style="background:${SANS_LISTES}"></span>pas de résultat</div>` : "") + `</div>`;
   } else if (def.type === "typo") {
     // Légende = liste des types avec leur profil moyen national, et leur poids ici
     html += `<div class="types">` + META.typo.map(t => {
