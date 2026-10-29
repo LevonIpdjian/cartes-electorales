@@ -546,13 +546,14 @@ const DONNEES = __DATA__;
 const META = DONNEES.meta;
 const VUE = META.vue_ensemble;   // true sur la page du département (une zone = une circonscription)
 
-const RAMPE = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"];
+// Dégradé violet, du clair au foncé (une seule teinte, clarté régulière)
+const RAMPE = ["#e4defb", "#c7bbf5", "#a896ee", "#8a72e3", "#6c51d1", "#5238ad", "#3a2580"];
 const SANS_DONNEE = "#d9d8d4";
 const CLASSES_LISTES = [
   { min: 0, max: 1, couleur: "#e4e3df", texte: "1 liste (pas de choix)" },
-  { min: 2, max: 2, couleur: "#86b6ef", texte: "2 listes" },
-  { min: 3, max: 3, couleur: "#2a78d6", texte: "3 listes" },
-  { min: 4, max: 9999, couleur: "#104281", texte: "4 listes ou plus" },
+  { min: 2, max: 2, couleur: "#a896ee", texte: "2 listes" },
+  { min: 3, max: 3, couleur: "#6c51d1", texte: "3 listes" },
+  { min: 4, max: 9999, couleur: "#3a2580", texte: "4 listes ou plus" },
 ];
 const INDICATEURS = {
   pres2022: { titre: "Mélenchon - présidentielle 2022 (1er tour)", type: "pct", cle: "pres2022" },
